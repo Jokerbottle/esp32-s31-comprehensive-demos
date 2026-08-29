@@ -7,5 +7,6 @@
   "idf.currentSetup": "C:\\Espressif\\.espressif\\master\\esp-idf",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32s31"
-  }
+  },
+  "idf.portWin": "COM9"
 }
