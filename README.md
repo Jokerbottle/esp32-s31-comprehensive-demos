@@ -27,7 +27,6 @@
 
 1. 使用 ESP-IDF Terminal 编译并烧录：
    ```powershell
-   & 'C:\Espressif\tools\Microsoft.master.PowerShell_profile.ps1'
    idf.py build flash monitor
    ```
 2. 首次上电后，打开手机 ESP-TOUCH App 发送当前 WiFi 的 `SSID` / `PASSWORD`；
