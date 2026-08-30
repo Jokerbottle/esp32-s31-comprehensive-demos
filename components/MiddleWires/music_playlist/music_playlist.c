@@ -45,6 +45,10 @@ static const char *s_artists[] = {
 /* 连续失败达到该次数后换下一位歌手 */
 #define MAX_FAIL_PER_ARTIST 4
 
+/* 全部歌手无可用曲目时的冷却重试间隔（秒） */
+#define RETRY_DELAY_SEC 60
+#define RETRY_DELAY_TICKS (RETRY_DELAY_SEC * 2)   /* 500ms/tick */
+
 /* 控制任务栈：搜索/重定向预解析含 TLS 握手，需要较大栈 */
 #define PLAYLIST_TASK_STACK_SIZE (16 * 1024)
 #define PLAYLIST_TASK_NAME       "music_ctrl"
@@ -56,6 +60,7 @@ static volatile bool s_need_next = false;      /* 事件标志：主循环查状
 static int s_fail_count[ARTIST_COUNT] = { 0 }; /* 每歌手连续失败次数 */
 static uint64_t s_last_pos = 0;                /* 看门狗：上次进度 */
 static int s_stall_ticks = 0;                  /* 看门狗：停滞计数（2s/tick） */
+static int s_retry_ticks = 0;                  /* >0：全部歌手无曲目时的冷却重试倒计时 */
 
 /* ---------------- 内部工具 ---------------- */
 
@@ -106,8 +111,9 @@ static esp_err_t play_song(const char *song_id)
 }
 
 /* 搜索当前歌手的第 s_fail_count 个 MP3 并播放（skip=0 时 mg_ 源优先）。
- * 当前歌手无可用曲目或播放启动失败时，自动轮转到下一位歌手。 */
-static void play_next_song(void)
+ * 当前歌手无可用曲目或播放启动失败时，自动轮转到下一位歌手。
+ * 返回 ESP_OK 表示已启动播放；ESP_FAIL 表示所有歌手暂无可用 MP3（调用方应安排重试）。 */
+static esp_err_t play_next_song(void)
 {
     /* 释放上一首的 song id */
     if (s_current_id) {
@@ -142,21 +148,25 @@ static void play_next_song(void)
         s_current_id = found_id;
         ESP_LOGI(TAG, ">> %s - song id: %s", artist, s_current_id);
         if (play_song(s_current_id) == ESP_OK) {
-            return;
+            return ESP_OK;
         }
         free(s_current_id);
         s_current_id = NULL;
+        /* 连续失败过多：换歌手但保留失败计数——下一轮从该歌手列表更深处
+         * 继续探索（避免每轮重复踩前几首的坑）；计数在"无更多结果"时才清零 */
         if (++s_fail_count[s_artist_idx] >= MAX_FAIL_PER_ARTIST) {
-            s_fail_count[s_artist_idx] = 0;
             s_artist_idx = (s_artist_idx + 1) % (int)ARTIST_COUNT;
         }
     }
 
-    /* 所有歌手都没找到 MP3（理论上不会发生） */
-    ESP_LOGE(TAG, "所有歌手均无 MP3 音源可用！");
+    /* 遍历一圈仍无可用曲目：不放弃，交由控制任务冷却后重试
+     * （服务器上游慢/临时故障时通常稍后即可恢复） */
+    ESP_LOGW(TAG, "所有歌手暂无可用 MP3，%d 秒后重试...", RETRY_DELAY_SEC);
+    return ESP_FAIL;
 }
 
-/* 播放完毕/出错后的安全切歌：查询真实播放器状态，避免旧流的延迟事件打断新流 */
+/* 播放完毕/出错后的安全切歌：查询真实播放器状态，避免旧流的延迟事件打断新流。
+ * 切歌失败（全部歌手暂无可用曲目）时安排冷却重试。 */
 static void check_auto_next(void)
 {
     if (!s_need_next) {
@@ -178,14 +188,15 @@ static void check_auto_next(void)
         s_artist_idx = (s_artist_idx + 1) % (int)ARTIST_COUNT;
         ESP_LOGI(TAG, "=== 歌曲播放完毕，切到下一位歌手 ===");
     } else {
-        /* 播放出错：同歌手换下一首（失败计数 +1） */
+        /* 播放出错：同歌手换下一首（失败计数 +1，过多则换歌手并保留计数继续深探） */
         ESP_LOGW(TAG, "播放出错，重试 '%s' 的下一首", s_artists[s_artist_idx]);
         if (++s_fail_count[s_artist_idx] >= MAX_FAIL_PER_ARTIST) {
-            s_fail_count[s_artist_idx] = 0;
             s_artist_idx = (s_artist_idx + 1) % (int)ARTIST_COUNT;
         }
     }
-    play_next_song();
+    if (play_next_song() != ESP_OK) {
+        s_retry_ticks = RETRY_DELAY_TICKS;
+    }
 }
 
 /* 停滞看门狗：进度长时间不动（如解码器卡死且无事件）时强制跳过，保证歌单永不卡死 */
@@ -239,14 +250,27 @@ static void player_event_cb(esp_player_event_type_t event, void *data, void *ctx
     }
 }
 
-/* 播放控制任务：启动首曲 + 500ms 轮询状态机（切歌/看门狗/心跳日志） */
+/* 播放控制任务：启动首曲 + 500ms 轮询状态机（切歌/看门狗/心跳/冷却重试） */
 static void playlist_task(void *arg)
 {
     (void)arg;
     int tick = 0;
-    play_next_song();
+    if (play_next_song() != ESP_OK) {
+        s_retry_ticks = RETRY_DELAY_TICKS;
+    }
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(500));
+
+        /* 冷却重试：上一轮全部歌手无可用曲目，倒计时结束后再试一轮 */
+        if (s_retry_ticks > 0) {
+            if (--s_retry_ticks == 0) {
+                if (play_next_song() != ESP_OK) {
+                    s_retry_ticks = RETRY_DELAY_TICKS;
+                }
+            }
+            continue;
+        }
+
         check_auto_next();
         if (++tick % 4 == 0) {       /* 约每 2 秒：停滞检测 */
             check_stall();

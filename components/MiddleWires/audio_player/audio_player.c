@@ -613,7 +613,9 @@ esp_err_t audio_player_resolve_url(const char *url_in, char *url_out, int out_si
             .disable_auto_redirect = true,   /* 手动逐跳跟随，拿到最终直连地址 */
             .event_handler = redirect_event_cb,
             .user_data = &ctx,
-            .timeout_ms = 10000,
+            /* hop0 是 lx-server stream.view：其需向上游音源取播放地址，
+             * 上游（如咪咕）慢时可能超过 10s，故放宽到 20s */
+            .timeout_ms = 20000,
             .crt_bundle_attach = esp_crt_bundle_attach,  /* 支持 HTTPS CDN（咪咕等） */
             .buffer_size = 2048,
         };
