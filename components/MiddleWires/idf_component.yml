@@ -1,0 +1,10 @@
+dependencies:
+  espressif/esp_player: ^1.0.5
+  espressif/esp_audio_render: ~1.0
+  espressif/esp_codec_dev: 2.0.0-beta1
+  espressif/esp_extractor: ~1.0
+  espressif/esp_audio_codec: ~2.5
+  espressif/gmf_core: ~1.0
+  espressif/gmf_audio: ~1.0
+  espressif/gmf_io: ~1.0
+  espressif/media_lib_sal: ~1.0

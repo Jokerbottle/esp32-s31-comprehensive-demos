@@ -1,31 +1,48 @@
 /* ESP32-S31 综合例程 - 应用入口
  *
- * 本例程演示基于 ESP-TOUCH 的智能配网：
- *   - 上电后先初始化 NVS；
- *   - 通过 MiddleWires 提供的 wifi_provision 模块完成配网；
- *   - 若 NVS 已保存 WiFi 凭据则直连，否则进入手机配网模式。
+ * 职责（仅初始化，播放控制全部在 MiddleWires/music_playlist 后台任务中）：
+ *  1) NVS + ESP-TOUCH 智能配网（NVS 有凭据直连，无凭据进入配网）；
+ *  2) WiFi 就绪后启动音乐轮播（music_playlist_start），其余全自动：
+ *     五位歌手（邓紫棋/周杰伦/薛之谦/林俊杰/陈奕迅）轮转搜索 MP3 并连播，
+ *     播完自动切歌、出错/停滞自动跳曲。
+ *
+ * lx-server 连接参数（IP/端口/账号）在 menuconfig 的
+ * "LX-Server Music Player Configuration" 中配置（main/Kconfig.projbuild）。
  */
 
 #include <stdio.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_log.h"
 #include "nvs_flash.h"
 #include "wifi_provision.h"
+#include "music_playlist.h"
+
+static const char *TAG = "app_main";
 
 void app_main(void)
 {
-    /* 1. 初始化 NVS（WiFi 凭据持久化依赖此功能） */
+    /* ---------- 1. 智能配网（NVS 直连优先，否则 ESP-TOUCH 配网） ---------- */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        /* NVS 分区异常时擦除后重试 */
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
 
-    printf("=== ESP32-S31 智能配网例程启动 ===\r\n");
+    printf("=== ESP32-S31 网络音乐播放器启动 ===\r\n");
 
-    /* 2. 初始化 WiFi 配网运行环境 */
     ESP_ERROR_CHECK(wifi_provision_init());
-
-    /* 3. 启动配网：优先使用 NVS 凭据直连，否则进入 ESP-TOUCH 配网 */
     ESP_ERROR_CHECK(wifi_provision_start());
+
+    /* 等待 WiFi 真正拿到 IP（lx-server 与开发板需在同一路由器下） */
+    ESP_LOGI(TAG, "等待 WiFi 连接...");
+    if (wifi_provision_wait_connected(pdMS_TO_TICKS(30000)) != ESP_OK) {
+        ESP_LOGE(TAG, "WiFi 连接超时");
+        return;
+    }
+    ESP_LOGI(TAG, "WiFi 已连接");
+
+    /* ---------- 2. 启动音乐轮播（后台任务接管播放控制） ---------- */
+    ESP_ERROR_CHECK(music_playlist_start());
 }

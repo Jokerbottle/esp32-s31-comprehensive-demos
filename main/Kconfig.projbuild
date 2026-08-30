@@ -1,0 +1,30 @@
+menu "LX-Server Music Player Configuration"
+
+    config LX_SERVER_IP
+        string "lx-server IP address"
+        default "192.168.1.8"
+        help
+            IP address of the machine running lx-server (Subsonic API).
+            Must be reachable from the ESP32-S31 board (same LAN/router).
+
+    config LX_SERVER_PORT
+        int "lx-server port"
+        range 1 65535
+        default 9527
+        help
+            TCP port of lx-server (see lx-server config.js).
+
+    config LX_USER
+        string "Subsonic username"
+        default "ESP32-S31-Function-CoreBoard-1"
+        help
+            Subsonic user created in lx-server (user.enablePath recommended).
+
+    config LX_PASSWORD
+        string "Subsonic password"
+        default "123456"
+        help
+            Password of the Subsonic user. Plaintext is accepted by lx-server
+            via the p= parameter.
+
+endmenu

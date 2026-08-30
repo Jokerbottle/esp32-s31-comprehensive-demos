@@ -281,3 +281,13 @@ esp_err_t wifi_provision_start(void)
 
     return ESP_OK;
 }
+
+esp_err_t wifi_provision_wait_connected(TickType_t timeout_ticks)
+{
+    if (s_wifi_event_group == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, CONNECTED_BIT,
+                                          false, false, timeout_ticks);
+    return (bits & CONNECTED_BIT) ? ESP_OK : ESP_ERR_TIMEOUT;
+}

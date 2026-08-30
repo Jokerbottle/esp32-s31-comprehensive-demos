@@ -33,6 +33,16 @@ esp_err_t wifi_provision_init(void);
  */
 esp_err_t wifi_provision_start(void);
 
+/**
+ * @brief 阻塞等待 WiFi 连接成功（获取到 IP）
+ *
+ * 在需要访问网络（如下载音频流）前调用，确保链路已就绪。
+ *
+ * @param[in] timeout_ticks 最大等待时间（FreeRTOS tick），可用 portMAX_DELAY 永久等待
+ * @return esp_err_t ESP_OK 表示已连接；超时返回 ESP_ERR_TIMEOUT
+ */
+esp_err_t wifi_provision_wait_connected(TickType_t timeout_ticks);
+
 #ifdef __cplusplus
 }
 #endif
