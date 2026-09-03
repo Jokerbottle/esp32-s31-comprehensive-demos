@@ -72,23 +72,17 @@ esp_err_t audio_player_get_position(audio_player_t *player, uint64_t *pos_ms, ui
 esp_err_t audio_player_set_event_cb(audio_player_t *player, audio_player_event_cb_t cb, void *ctx);
 
 /**
- * @brief 在 lx-server 上搜索指定歌手的 MP3 曲目
+ * @brief 设置输出音量并写入 NVS 持久化（下次上电自动恢复）
  *
- * 调用 Subsonic search3 接口，筛选 contentType="audio/mpeg" 的结果。
- * skip=0 时优先返回 kw_ 源（酷我直连）；skip>0 时返回第 skip 个匹配（用于失败重试跳过坏曲目）。
- * 找到则将 song_id 写入 out_id（调用者需 free），否则返回 ESP_ERR_NOT_FOUND。
- *
- * @param[in]  server_ip   lx-server IP
- * @param[in]  server_port lx-server 端口
- * @param[in]  user        用户名
- * @param[in]  password    密码
- * @param[in]  artist      歌手名（如 "周杰伦"）
- * @param[in]  skip        跳过前 skip 个匹配（失败重试用）
- * @param[out] out_id      找到的 song id（需 free）
+ * @param[in] player 播放器实例
+ * @param[in] vol    音量值 0~100
  */
-esp_err_t audio_player_search_mp3(const char *server_ip, int server_port,
-                                  const char *user, const char *password,
-                                  const char *artist, int skip, char **out_id);
+esp_err_t audio_player_set_volume(audio_player_t *player, int vol);
+
+/**
+ * @brief 读取当前输出音量（0~100）
+ */
+esp_err_t audio_player_get_volume(audio_player_t *player, int *vol);
 
 /**
  * @brief 预解析播放地址：手动跟随 302 重定向，返回最终可直连的 CDN URL
@@ -97,11 +91,14 @@ esp_err_t audio_player_search_mp3(const char *server_ip, int server_port,
  * 重定向。本函数用 esp_http_client 逐跳解析（最多 5 跳），返回 200 的最终地址。
  * 支持 HTTPS CDN（启用证书 bundle）。
  *
- * @param[in]  url_in   原始 URL
- * @param[out] url_out  输出最终 URL（调用者提供缓冲区）
- * @param[in]  out_size url_out 缓冲区大小
+ * @param[in]  url_in     原始 URL
+ * @param[out] url_out    输出最终 URL（调用者提供缓冲区）
+ * @param[in]  out_size   url_out 缓冲区大小
+ * @param[out] detail     失败原因详情（如 "hop0 超时" / "hop1 HTTP403"），可为 NULL
+ * @param[in]  detail_sz  detail 缓冲区大小
  */
-esp_err_t audio_player_resolve_url(const char *url_in, char *url_out, int out_size);
+esp_err_t audio_player_resolve_url(const char *url_in, char *url_out, int out_size,
+                                   char *detail, int detail_size);
 
 #ifdef __cplusplus
 }

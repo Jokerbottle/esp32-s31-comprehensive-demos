@@ -1,0 +1,135 @@
+/* S31 音乐播放器 - 深色主题 */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #14161c; color: #dfe3ea;
+  font-family: "Microsoft YaHei", system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 24px; background: #1b1e27; border-bottom: 1px solid #2a2e3a;
+}
+header h1 { font-size: 20px; color: #7eb8ff; }
+.top-right { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.chip {
+  background: #232838; border-radius: 12px; padding: 3px 10px;
+  color: #9fb0d0; font-size: 12px;
+}
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot.on  { background: #3ddc84; box-shadow: 0 0 6px #3ddc84; }
+.dot.off { background: #ff5f56; box-shadow: 0 0 6px #ff5f56; }
+
+main {
+  display: grid; grid-template-columns: 300px 1fr 1fr;
+  gap: 16px; padding: 16px 24px; max-width: 1400px; margin: 0 auto;
+}
+@media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+
+.card {
+  background: #1b1e27; border: 1px solid #2a2e3a; border-radius: 12px;
+  padding: 16px; display: flex; flex-direction: column; gap: 12px;
+}
+.card-title { font-size: 14px; color: #9fb0d0; display: flex; justify-content: space-between; align-items: center; }
+
+/* 播放器卡片 */
+.player { align-items: center; }
+#cover {
+  width: 200px; height: 200px; border-radius: 10px; background: #232838;
+  object-fit: cover; display: block;
+}
+#cover:not([src])::after, #cover[src=""] { }
+.meta { text-align: center; width: 100%; }
+.title { font-size: 17px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist { font-size: 13px; color: #9fb0d0; margin-top: 4px; }
+
+.progress-row { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; color: #9fb0d0; }
+.progress-row input[type=range] { flex: 1; }
+
+.controls { display: flex; gap: 14px; align-items: center; }
+button {
+  background: #232838; color: #dfe3ea; border: 1px solid #333a4d;
+  border-radius: 8px; padding: 6px 14px; cursor: pointer; font-size: 13px;
+}
+button:hover { background: #2c3347; }
+button.big { font-size: 20px; padding: 8px 16px; border-radius: 50%; }
+button.main { background: #2d5bd1; border-color: #2d5bd1; }
+button.main:hover { background: #3d6be1; }
+button.ghost { background: transparent; border-color: #333a4d; color: #9fb0d0; }
+button.small { padding: 2px 8px; font-size: 12px; }
+
+.mode-row, .volume-row { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 13px; }
+.volume-row input[type=range] { flex: 1; }
+.volume-row input[type=number] {
+  width: 56px; background: #232838; color: #dfe3ea;
+  border: 1px solid #333a4d; border-radius: 6px; padding: 3px 6px; font-size: 13px;
+}
+
+/* 搜索与歌单列表 */
+.search-row { display: flex; gap: 8px; }
+.search-row input {
+  flex: 1; background: #232838; color: #dfe3ea; border: 1px solid #333a4d;
+  border-radius: 8px; padding: 8px 12px; font-size: 14px;
+}
+.list { overflow-y: auto; max-height: 420px; display: flex; flex-direction: column; gap: 6px; }
+.row {
+  display: flex; align-items: center; gap: 10px;
+  background: #20242f; border-radius: 8px; padding: 8px 10px; font-size: 13px;
+}
+.row .info { flex: 1; overflow: hidden; }
+.row .t { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .a { color: #9fb0d0; font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row button { padding: 3px 10px; font-size: 12px; flex-shrink: 0; }
+.row.playing { border: 1px solid #3ddc84; }
+.src-badge {
+  flex-shrink: 0; font-size: 11px; padding: 2px 6px; border-radius: 6px;
+  background: #2c3347; color: #9fb0d0;
+}
+.src-kw { background: #1d3a2a; color: #3ddc84; }   /* 酷我：最稳 */
+.src-mg { background: #2b2a1d; color: #d8c84a; }   /* 咪咕 */
+.src-kg { background: #3a2626; color: #ff9a76; }   /* 酷狗：波动大 */
+.empty { color: #5b6478; font-size: 13px; text-align: center; padding: 20px; }
+
+/* 日志 */
+.log {
+  background: #12141a; border-radius: 8px; padding: 8px;
+  font-family: Consolas, monospace; font-size: 11px; color: #7fd18a;
+  height: 180px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+}
+.log .err { color: #ff8a80; }
+.log .info { color: #9fb0d0; }
+
+/* 弹窗 */
+.modal-mask {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center; z-index: 100;
+}
+.modal-mask.hidden { display: none; }
+.modal {
+  background: #1b1e27; border: 1px solid #2a2e3a; border-radius: 12px;
+  width: 380px; padding: 20px;
+}
+.modal-title { font-size: 16px; font-weight: bold; margin-bottom: 14px; }
+.modal-body label { font-size: 13px; color: #9fb0d0; }
+.modal-body input {
+  width: 100%; margin-top: 6px; background: #232838; color: #dfe3ea;
+  border: 1px solid #333a4d; border-radius: 8px; padding: 9px 12px; font-size: 15px;
+}
+.modal .hint { font-size: 12px; color: #5b6478; margin-top: 10px; line-height: 1.6; }
+.modal-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.main-btn { background: #2d5bd1; border-color: #2d5bd1; padding: 8px 20px; }
+.main-btn:hover { background: #3d6be1; }
+
+/* Toast 提示 */
+#toast {
+  position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+  background: #2c3347; color: #fff; padding: 10px 20px; border-radius: 8px;
+  font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .3s; z-index: 200;
+}
+#toast.show { opacity: 1; }
+
+input[type=range] { accent-color: #2d5bd1; }
+select {
+  background: #232838; color: #dfe3ea; border: 1px solid #333a4d;
+  border-radius: 6px; padding: 4px 8px; font-size: 13px;
+}

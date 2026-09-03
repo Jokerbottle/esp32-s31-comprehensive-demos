@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>S31 音乐播放器</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<!-- 顶部栏 -->
+<header>
+  <h1>♪ S31 音乐播放器</h1>
+  <div class="top-right">
+    <span id="cpu-chip" class="chip" title="CPU 占用率 / 空闲堆 / WiFi 信号">CPU --%</span>
+    <span id="conn-dot" class="dot off" title="连接状态"></span>
+    <span id="conn-text">未连接</span>
+    <button id="btn-ipcfg" class="ghost" title="设置开发板 IP">⚙ IP</button>
+  </div>
+</header>
+
+<main>
+  <!-- 左列：播放器 -->
+  <section class="card player">
+    <img id="cover" src="" alt="♪" onerror="this.src=''">
+    <div class="meta">
+      <div id="cur-title" class="title">未播放</div>
+      <div id="cur-artist" class="artist">--</div>
+    </div>
+    <div class="progress-row">
+      <span id="t-cur">0:00</span>
+      <input id="progress" type="range" min="0" max="1000" value="0" disabled>
+      <span id="t-dur">0:00</span>
+    </div>
+    <div class="controls">
+      <button id="btn-prev" class="big" title="上一首">⏮</button>
+      <button id="btn-playpause" class="big main" title="播放/暂停">▶</button>
+      <button id="btn-next" class="big" title="下一首">⏭</button>
+      <button id="btn-stop" class="ghost" title="停止">⏹</button>
+    </div>
+    <div class="mode-row">
+      <span>播放模式：</span>
+      <select id="mode">
+        <option value="seq">顺序播放</option>
+        <option value="one">单曲循环</option>
+        <option value="random">随机播放</option>
+      </select>
+    </div>
+    <div class="volume-row">
+      <span>🔊</span>
+      <input id="volume" type="range" min="0" max="100" value="40">
+      <input id="volume-num" type="number" min="0" max="100" value="40">
+    </div>
+  </section>
+
+  <!-- 中列：搜索 -->
+  <section class="card">
+    <div class="card-title">🎵 歌曲搜索（仅 MP3 音源）</div>
+    <div class="search-row">
+      <input id="search-input" type="text" placeholder="输入歌名 / 歌手...">
+      <button id="btn-search">搜索</button>
+    </div>
+    <div id="search-results" class="list"></div>
+  </section>
+
+  <!-- 右列：歌单 + 日志 -->
+  <section class="card">
+    <div class="card-title">📃 播放歌单
+      <button id="btn-clear" class="ghost small">清空</button>
+    </div>
+    <div id="playlist" class="list"></div>
+    <div class="card-title">📄 设备日志</div>
+    <div id="log" class="log"></div>
+  </section>
+</main>
+
+<!-- IP 连接弹窗 -->
+<div id="ip-modal" class="modal-mask">
+  <div class="modal">
+    <div class="modal-title">连接开发板</div>
+    <div class="modal-body">
+      <label>开发板 IP 地址 (IPv4)：</label>
+      <input id="ip-input" type="text" placeholder="例如 192.168.1.50">
+      <div class="hint">与电脑、lx-server 同一局域网。确认后将在浏览器与开发板间建立 WebSocket 直连。</div>
+    </div>
+    <div class="modal-foot">
+      <button id="btn-ip-cancel" class="ghost">取消</button>
+      <button id="btn-ip-ok" class="main-btn">确认连接</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>

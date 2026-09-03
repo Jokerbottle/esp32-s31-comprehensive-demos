@@ -1,4 +1,4 @@
-/*
+﻿/*
  * audio_player.c - 基于 esp_player 的音频播放封装
  *
  * 数据流：HTTP/文件 -> esp_player 提取器/解码器（gmf）-> esp_audio_render
@@ -34,6 +34,8 @@
 #define AUDIO_OUT_CHANNELS        2
 
 static const char *TAG = "audio_player";
+
+static void volume_load(void);
 
 /* 不透明播放器实例，持有 ESP-GMF 各句柄 */
 struct audio_player_s {
@@ -187,6 +189,7 @@ esp_err_t audio_player_init(audio_player_t **out_player)
         ESP_LOGE(TAG, "bsp_es8311_open failed");
         goto fail;
     }
+    volume_load();
 
     *out_player = ap;
     ESP_LOGI(TAG, "audio player ready (%u Hz / %u bit / %u ch)",
@@ -361,224 +364,59 @@ esp_err_t audio_player_set_event_cb(audio_player_t *ap, audio_player_event_cb_t 
     return ESP_OK;
 }
 
-/* ====================== MP3 搜索（Subsonic search3） ====================== */
 
-#include "esp_http_client.h"
+/* ====================== 音量 NVS 持久化 ====================== */
 
-/* 将 UTF-8 字符串进行 URL 百分号编码（用于 query 参数，支持中文）。
- * 返回编码后长度，缓冲区不足返回 -1。 */
-static int url_encode(const char *src, char *dst, int dst_size)
+#include "nvs.h"
+
+#define VOL_NVS_NAMESPACE "audiocfg"
+#define VOL_NVS_KEY       "vol"
+
+/* 上电恢复上次保存的音量（audio_player_init 内部在 codec 打开后调用） */
+static void volume_load(void)
 {
-    static const char hex[] = "0123456789ABCDEF";
-    int o = 0;
-    for (const unsigned char *s = (const unsigned char *)src; *s; s++) {
-        unsigned char c = *s;
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
-            if (o + 1 >= dst_size) {
-                return -1;
-            }
-            dst[o++] = (char)c;
-        } else {
-            if (o + 3 >= dst_size) {
-                return -1;
-            }
-            dst[o++] = '%';
-            dst[o++] = hex[c >> 4];
-            dst[o++] = hex[c & 0xF];
-        }
+    nvs_handle_t h;
+    if (nvs_open(VOL_NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
+        return;
     }
-    dst[o] = '\0';
-    return o;
+    uint8_t vol = 0;
+    if (nvs_get_u8(h, VOL_NVS_KEY, &vol) == ESP_OK && vol <= 100) {
+        bsp_es8311_set_volume((int)vol);
+        ESP_LOGI(TAG, "恢复上电音量: %d%%", (int)vol);
+    }
+    nvs_close(h);
 }
 
-
-/* 在 [begin, end) 范围内查找 name="value" 属性，返回 value 起始指针与长度。
- * 严格限定在单个 <song> 元素内，避免跨元素误匹配。 */
-static const char *attr_in(const char *begin, const char *end,
-                           const char *name, int *val_len)
+esp_err_t audio_player_set_volume(audio_player_t *ap, int vol)
 {
-    char pat[32];
-    snprintf(pat, sizeof(pat), "%s=\"", name);
-    int pat_len = (int)strlen(pat);
-    for (const char *p = begin; p + pat_len <= end; p++) {
-        if (memcmp(p, pat, pat_len) == 0) {
-            const char *v = p + pat_len;
-            const char *ve = memchr(v, '"', end - v);
-            if (!ve) {
-                return NULL;
-            }
-            *val_len = (int)(ve - v);
-            return v;
-        }
-    }
-    return NULL;
-}
-
-/* 从 search3 XML 响应中挑选 MP3 song id。
- * 收集全部 MP3 匹配（至多 MP3_MAX_MATCHES 个），选择策略：
- *   skip==0：优先 mg_（咪咕，CDN 直给真 MP3），其次 kw_，否则第一个匹配；
- *   skip>0 ：返回第 skip 个匹配（失败重试跳过坏曲目）。
- * 返回选中的 id（调用者 free），无匹配返回 NULL。 */
-#define MP3_MAX_MATCHES 32
-
-static char *extract_mp3_id(const char *xml, int xml_len,
-                            const char *target_artist, int skip)
-{
-    char *matches[MP3_MAX_MATCHES] = { 0 };
-    int n_match = 0;
-    int mg_idx = -1;
-    int kw_idx = -1;
-    const char *p = xml;
-    const char *xml_end = xml + xml_len;
-
-    while (p && p < xml_end && n_match < MP3_MAX_MATCHES) {
-        p = strstr(p, "<song ");
-        if (!p) {
-            break;
-        }
-        const char *el_end = strstr(p, "/>");
-        if (!el_end || el_end > xml_end) {
-            break;
-        }
-        const char *attr_begin = p + 6;
-        int id_len = 0, ct_len = 0, art_len = 0;
-
-        const char *id_v = attr_in(attr_begin, el_end, "id", &id_len);
-        const char *ct_v = attr_in(attr_begin, el_end, "contentType", &ct_len);
-        if (id_v && ct_v && ct_len == 10 && memcmp(ct_v, "audio/mpeg", 10) == 0) {
-            /* 歌手匹配：目标歌手名需出现在 artist 属性值中（如 "G.E.M. 邓紫棋" 含 "邓紫棋"） */
-            bool match = true;
-            if (target_artist) {
-                match = false;
-                const char *art_v = attr_in(attr_begin, el_end, "artist", &art_len);
-                if (art_v) {
-                    int t_len = (int)strlen(target_artist);
-                    for (const char *s = art_v; s + t_len <= art_v + art_len; s++) {
-                        if (memcmp(s, target_artist, t_len) == 0) {
-                            match = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if (match) {
-                if (id_len > 3 && memcmp(id_v, "mg_", 3) == 0 && mg_idx < 0) {
-                    mg_idx = n_match;   /* 咪咕 CDN 直给 MP3_320，最优先 */
-                }
-                if (id_len > 3 && memcmp(id_v, "kw_", 3) == 0 && kw_idx < 0) {
-                    kw_idx = n_match;
-                }
-                matches[n_match++] = strndup(id_v, id_len);
-            }
-        }
-        p = el_end + 2;
-    }
-
-    char *chosen = NULL;
-    if (n_match > 0) {
-        if (skip <= 0) {
-            /* 首选：mg_ > kw_ > 第一个匹配 */
-            int pick = (mg_idx >= 0) ? mg_idx : (kw_idx >= 0 ? kw_idx : 0);
-            chosen = strdup(matches[pick]);
-        } else if (skip < n_match) {
-            chosen = strdup(matches[skip]);
-        }
-    }
-    for (int i = 0; i < n_match; i++) {
-        free(matches[i]);
-    }
-    return chosen;
-}
-
-esp_err_t audio_player_search_mp3(const char *server_ip, int server_port,
-                                  const char *user, const char *password,
-                                  const char *artist, int skip, char **out_id)
-{
-    if (!server_ip || !user || !password || !artist || !out_id) {
+    if (ap == NULL || vol < 0 || vol > 100) {
         return ESP_ERR_INVALID_ARG;
     }
-    *out_id = NULL;
-
-    /* 构造 search3 URL：query=歌手名（中文需 URL 编码，否则 esp_http_client 解析失败） */
-    char query_enc[128];
-    if (url_encode(artist, query_enc, sizeof(query_enc)) < 0) {
-        ESP_LOGE(TAG, "URL encode failed for artist '%s'", artist);
-        return ESP_ERR_INVALID_ARG;
-    }
-    char url[384];
-    snprintf(url, sizeof(url),
-             "http://%s:%d/rest/search3.view?u=%s&p=%s&v=1.16.1&c=esp32"
-             "&query=%s&songCount=100",
-             server_ip, server_port, user, password, query_enc);
-
-    esp_http_client_config_t cfg = {
-        .url = url,
-        .timeout_ms = 15000,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    if (!client) {
-        return ESP_FAIL;
-    }
-
-    esp_err_t err = esp_http_client_open(client, 0);
+    esp_err_t err = bsp_es8311_set_volume(vol);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "HTTP open failed for search: %s", esp_err_to_name(err));
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
         return err;
     }
-
-    int content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-    if (status != 200 || content_length <= 0) {
-        ESP_LOGW(TAG, "search3 status=%d len=%d", status, content_length);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return ESP_FAIL;
+    /* 写入 NVS，下次上电自动恢复 */
+    nvs_handle_t h;
+    if (nvs_open(VOL_NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, VOL_NVS_KEY, (uint8_t)vol);
+        nvs_commit(h);
+        nvs_close(h);
     }
+    return ESP_OK;
+}
 
-    /* 完整读取响应体（songCount=100 时约 40-50KB，不能截断） */
-    int buf_size = (content_length < 128 * 1024) ? content_length : 128 * 1024;
-    char *buf = calloc(1, buf_size + 1);
-    if (!buf) {
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return ESP_ERR_NO_MEM;
+esp_err_t audio_player_get_volume(audio_player_t *ap, int *vol)
+{
+    if (ap == NULL || vol == NULL) {
+        return ESP_ERR_INVALID_ARG;
     }
-    int read_total = 0;
-    while (read_total < buf_size) {
-        int n = esp_http_client_read(client, buf + read_total, buf_size - read_total);
-        if (n <= 0) {
-            break;
-        }
-        read_total += n;
-    }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-
-    if (read_total <= 0) {
-        free(buf);
-        return ESP_FAIL;
-    }
-    buf[read_total] = '\0';
-
-    /* 提取 MP3 id（skip=0 时 kw_ 源优先） */
-    char *found = extract_mp3_id(buf, read_total, artist, skip);
-    free(buf);
-
-    if (found) {
-        ESP_LOGI(TAG, "Found MP3 for '%s': %s", artist, found);
-        *out_id = found;
-        return ESP_OK;
-    }
-
-    ESP_LOGW(TAG, "No MP3 found for artist '%s'", artist);
-    return ESP_ERR_NOT_FOUND;
+    return bsp_es8311_get_volume(vol);
 }
 
 /* ====================== 302 重定向预解析 ====================== */
 
+#include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 
 /* 捕获 302 响应的 Location 头 */
@@ -596,9 +434,14 @@ static esp_err_t redirect_event_cb(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
-esp_err_t audio_player_resolve_url(const char *url_in, char *url_out, int out_size)
+esp_err_t audio_player_resolve_url(const char *url_in, char *url_out, int out_size,
+                                   char *detail, int detail_size)
 {
+    if (detail && detail_size > 0) {
+        detail[0] = '\0';
+    }
     if (!url_in || !url_out || out_size <= 0) {
+        if (detail) snprintf(detail, detail_size, "参数错误");
         return ESP_ERR_INVALID_ARG;
     }
     strlcpy(url_out, url_in, out_size);
@@ -622,11 +465,16 @@ esp_err_t audio_player_resolve_url(const char *url_in, char *url_out, int out_si
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
         if (!client) {
             ESP_LOGE(TAG, "resolve: client init failed (hop %d)", hop);
+            if (detail) snprintf(detail, detail_size, "hop%d 初始化失败", hop);
             return ESP_FAIL;
         }
         esp_err_t err = esp_http_client_open(client, 0);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "resolve: open failed (hop %d): %s", hop, esp_err_to_name(err));
+            if (detail) {
+                snprintf(detail, detail_size, "hop%d %s",
+                         hop, err == ESP_ERR_TIMEOUT ? "超时" : esp_err_to_name(err));
+            }
             esp_http_client_cleanup(client);
             return err;
         }
@@ -647,8 +495,16 @@ esp_err_t audio_player_resolve_url(const char *url_in, char *url_out, int out_si
             continue;
         }
         ESP_LOGE(TAG, "resolve: unexpected status %d", status);
+        if (detail) {
+            if (status <= 0) {
+                snprintf(detail, detail_size, "hop%d 上游无响应", hop);
+            } else {
+                snprintf(detail, detail_size, "hop%d HTTP%d", hop, status);
+            }
+        }
         return ESP_FAIL;
     }
     ESP_LOGE(TAG, "resolve: too many redirects");
+    if (detail) snprintf(detail, detail_size, "重定向过多");
     return ESP_FAIL;
 }

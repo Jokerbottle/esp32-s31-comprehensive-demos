@@ -79,3 +79,10 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # PSRAM: required for FLAC/audio decode buffers
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_BOOT_INIT=y
+
+# HTTP server: websocket support (web remote control)
+CONFIG_HTTPD_WS_SUPPORT=y
+
+# FreeRTOS stats: CPU load report for web UI
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
